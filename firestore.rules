@@ -1,0 +1,101 @@
+rules_version = '2';
+
+// PRO-PLAN RULES.
+// Deploy with: firebase deploy --only firestore:rules
+//
+// Key change from an unrestricted/test-mode project: the `admins` collection is
+// NEVER writable from the client. Only the Cloud Functions in /functions (which run
+// with the Admin SDK and therefore bypass these rules entirely) can write it. This
+// is what actually enforces "only an existing admin can create another admin" —
+// the Kotlin-side checkIsAdmin()/addAdmin()/removeAdmin() calls go through those
+// functions, not through Firestore directly, so this restriction can't be bypassed
+// by a modified/decompiled APK calling Firestore straight.
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function isAdmin() {
+      return signedIn() &&
+        exists(/databases/$(database)/documents/admins/$(request.auth.token.email.lower()));
+    }
+
+    // Only Cloud Functions (Admin SDK) can ever write this collection.
+    // Authenticated clients may still read it, so the existing real-time
+    // "current admins" list in Settings keeps working.
+    match /admins/{email} {
+      allow read: if signedIn();
+      allow write: if false;
+    }
+
+    // Members directory: any signed-in member can read (needed for the directory,
+    // dues, events, etc.), only an admin can add/edit/remove members.
+    match /members/{memberId} {
+      allow read: if signedIn();
+      allow write: if isAdmin();
+    }
+
+    // Association-wide settings / office bearers: readable by all signed-in
+    // members, editable only by admins.
+    match /settings/{docId} {
+      allow read: if signedIn();
+      allow write: if isAdmin();
+    }
+    match /officeBearers/{docId} {
+      allow read: if signedIn();
+      allow write: if isAdmin();
+    }
+
+    // Financial + activity collections: readable by all signed-in members
+    // (transparency), writable only by admins.
+    match /maintenanceCollections/{docId} {
+      allow read: if signedIn();
+      allow write: if isAdmin();
+    }
+    match /bankTransactions/{docId} {
+      allow read: if signedIn();
+      allow write: if isAdmin();
+    }
+    match /donations/{docId} {
+      allow read: if signedIn();
+      allow write: if isAdmin();
+    }
+    match /generalExpenses/{docId} {
+      allow read: if signedIn();
+      allow write: if isAdmin();
+    }
+    match /activityLog/{docId} {
+      allow read: if isAdmin();
+      allow write: if isAdmin();
+    }
+
+    // Events & meetings: readable by all signed-in members, writable by admins.
+    // Meeting scanned-minutes photo subcollection inherits the same rule.
+    match /events/{docId} {
+      allow read: if signedIn();
+      allow write: if isAdmin();
+    }
+    match /eventCollections/{docId} {
+      allow read: if signedIn();
+      allow write: if isAdmin();
+    }
+    match /meetings/{meetingId} {
+      allow read: if signedIn();
+      allow write: if isAdmin();
+      match /photos/{photoId} {
+        allow read: if signedIn();
+        allow write: if isAdmin();
+      }
+    }
+
+    // Local business/service listings: any signed-in member can submit one
+    // (pending admin approval), but only an admin can approve/edit/delete.
+    match /serviceListings/{docId} {
+      allow read: if signedIn();
+      allow create: if signedIn();
+      allow update, delete: if isAdmin();
+    }
+  }
+}

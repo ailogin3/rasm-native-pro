@@ -1,0 +1,26 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <group
+        android:translateX="22"
+        android:translateY="22">
+        <!-- Circular ring accent -->
+        <path
+            android:fillColor="#33FFFFFF"
+            android:pathData="M32,2C15.43,2 2,15.43 2,32s13.43,30 30,30s30,-13.43 30,-30S48.57,2 32,2z" />
+        <!-- Main building / house outline -->
+        <path
+            android:fillColor="#FFD54F"
+            android:pathData="M32,10L14,24.5v25.5h36v-25.5L32,10z" />
+        <!-- Interior cut / doorway & pillars -->
+        <path
+            android:fillColor="#004D40"
+            android:pathData="M27,34h10v16h-10z M20,28h6v12h-6z M38,28h6v12h-6z" />
+        <!-- People / Community group silhouette in front -->
+        <path
+            android:fillColor="#FFFFFF"
+            android:pathData="M32,40c2.76,0 5,-2.24 5,-5s-2.24,-5 -5,-5s-5,2.24 -5,5S29.24,40 32,40z M32,43c-4,0 -10,2 -10,6v3h20v-3C42,45 36,43 32,43z" />
+    </group>
+</vector>

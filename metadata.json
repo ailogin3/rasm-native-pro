@@ -1,0 +1,6 @@
+{
+  "name": "RASM",
+  "description": "Residents Association Subscription Manager - Native Android App with Real-time Firebase Sync",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

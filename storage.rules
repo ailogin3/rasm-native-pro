@@ -1,0 +1,47 @@
+rules_version = '2';
+
+// PRO-PLAN RULES.
+// Deploy with: firebase deploy --only storage
+// Requires the Blaze plan — Cloud Storage isn't reachable at all on Spark.
+service firebase.storage {
+  match /b/{bucket}/o {
+
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function isAdmin() {
+      return signedIn() &&
+        firestore.exists(/databases/(default)/documents/admins/$(request.auth.token.email.lower()));
+    }
+
+    function isImage() {
+      return request.resource.contentType.matches('image/.*');
+    }
+
+    function underSizeLimit() {
+      // 5 MB safety ceiling per file — the app compresses to well under this
+      // (~a few hundred KB), this just guards against something bypassing the app.
+      return request.resource.size < 5 * 1024 * 1024;
+    }
+
+    // Member profile photos + nested family-member photos.
+    // Read: any signed-in member. Write: admin only (matches who's allowed to
+    // add/edit members in firestore.rules).
+    match /members/{memberId}/{allPaths=**} {
+      allow read: if signedIn();
+      allow write: if isAdmin() && isImage() && underSizeLimit();
+    }
+
+    // Scanned meeting-minutes photos.
+    match /meetings/{meetingId}/{allPaths=**} {
+      allow read: if signedIn();
+      allow write: if isAdmin() && isImage() && underSizeLimit();
+    }
+
+    // Everything else: closed by default.
+    match /{allPaths=**} {
+      allow read, write: if false;
+    }
+  }
+}
