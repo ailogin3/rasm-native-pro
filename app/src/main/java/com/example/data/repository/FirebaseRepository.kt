@@ -193,6 +193,70 @@ class FirebaseRepository(private val context: Context) {
         }
     }
 
+    /**
+     * PRO-PLAN ONLY: routed entirely through the "phoneBelongsToMember" Cloud Function,
+     * mirroring emailBelongsToMember. Call this BEFORE sending an OTP — phone sign-in
+     * auto-creates a Firebase user on first successful verification, so this is the
+     * only gate keeping non-members from ever getting an account.
+     */
+    suspend fun phoneBelongsToMember(phone: String): Boolean {
+        val functions = getFunctions() ?: return false
+        return try {
+            val result = functions.getHttpsCallable("phoneBelongsToMember")
+                .call(mapOf("phone" to phone.trim()))
+                .await()
+            (result.data as? Map<*, *>)?.get("belongsToMember") as? Boolean ?: false
+        } catch (e: Exception) {
+            Log.e(TAG, "Error checking member phone via Cloud Function", e)
+            false
+        }
+    }
+
+    /**
+     * Starts phone-number verification. phoneNumber must be E.164 (e.g. "+919876543210").
+     * Results arrive via the callbacks: onVerificationCompleted (instant auto-retrieval,
+     * mainly Play-services devices), onVerificationFailed, or onCodeSent (manual entry).
+     */
+    fun sendOtp(
+        phoneNumber: String,
+        activity: android.app.Activity,
+        callbacks: com.google.firebase.auth.PhoneAuthProvider.OnVerificationStateChangedCallbacks
+    ) {
+        val auth = getAuth()
+        if (auth == null) {
+            callbacks.onVerificationFailed(Exception("Firebase is not initialized"))
+            return
+        }
+        val options = com.google.firebase.auth.PhoneAuthOptions.newBuilder(auth)
+            .setPhoneNumber(phoneNumber.trim())
+            .setTimeout(60L, java.util.concurrent.TimeUnit.SECONDS)
+            .setActivity(activity)
+            .setCallbacks(callbacks)
+            .build()
+        com.google.firebase.auth.PhoneAuthProvider.verifyPhoneNumber(options)
+    }
+
+    fun buildOtpCredential(verificationId: String, code: String): com.google.firebase.auth.PhoneAuthCredential =
+        com.google.firebase.auth.PhoneAuthProvider.getCredential(verificationId, code)
+
+    /**
+     * Signs in (or, on first use, silently creates) the Firebase user for this phone
+     * credential. There is no separate "createUser" call for phone auth — Firebase
+     * does both in one step, which is why phoneBelongsToMember must run first.
+     */
+    suspend fun signInWithPhoneCredential(
+        credential: com.google.firebase.auth.PhoneAuthCredential
+    ): Result<FirebaseUser> {
+        val auth = getAuth() ?: return Result.failure(Exception("Firebase is not initialized"))
+        return try {
+            val authResult = auth.signInWithCredential(credential).await()
+            val user = authResult.user ?: throw Exception("Authentication returned null user")
+            Result.success(user)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
     fun signOut() {
         getAuth()?.signOut()
     }
@@ -231,12 +295,12 @@ class FirebaseRepository(private val context: Context) {
      * The client never reads the admins collection directly, so Firestore Rules can
      * (and should) lock that collection down to server-only access.
      */
-    suspend fun checkIsAdmin(email: String?): Boolean {
-        if (email.isNullOrBlank()) return false
+    suspend fun checkIsAdmin(phone: String?): Boolean {
+        if (phone.isNullOrBlank()) return false
         val functions = getFunctions() ?: return false
         return try {
             val result = functions.getHttpsCallable("checkIsAdmin")
-                .call(mapOf("email" to email.trim().lowercase()))
+                .call(mapOf("phone" to phone.trim()))
                 .await()
             (result.data as? Map<*, *>)?.get("isAdmin") as? Boolean ?: false
         } catch (e: Exception) {
@@ -272,13 +336,13 @@ class FirebaseRepository(private val context: Context) {
      * granting admin status to anyone else. The client no longer has direct write access
      * to the admins collection — see Firestore Rules.
      */
-    suspend fun addAdmin(email: String): Result<Unit> {
+    suspend fun addAdmin(phone: String): Result<Unit> {
         val functions = getFunctions() ?: return Result.failure(Exception("Firebase Functions unavailable"))
         return try {
             functions.getHttpsCallable("addAdmin")
-                .call(mapOf("email" to email.trim().lowercase()))
+                .call(mapOf("phone" to phone.trim()))
                 .await()
-            logActivity("Added admin", email.trim().lowercase())
+            logActivity("Added admin", phone.trim())
             Result.success(Unit)
         } catch (e: Exception) {
             Result.failure(e)
@@ -286,13 +350,13 @@ class FirebaseRepository(private val context: Context) {
     }
 
     /** PRO-PLAN ONLY: routed entirely through the "removeAdmin" Cloud Function. See addAdmin. */
-    suspend fun removeAdmin(email: String): Result<Unit> {
+    suspend fun removeAdmin(phone: String): Result<Unit> {
         val functions = getFunctions() ?: return Result.failure(Exception("Firebase Functions unavailable"))
         return try {
             functions.getHttpsCallable("removeAdmin")
-                .call(mapOf("email" to email.trim().lowercase()))
+                .call(mapOf("phone" to phone.trim()))
                 .await()
-            logActivity("Removed admin", email.trim().lowercase())
+            logActivity("Removed admin", phone.trim())
             Result.success(Unit)
         } catch (e: Exception) {
             Result.failure(e)

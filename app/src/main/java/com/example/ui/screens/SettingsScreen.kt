@@ -65,7 +65,7 @@ fun SettingsScreen(
                 ) {
                     Column {
                         Text(currentMember?.name ?: "Member Account", fontWeight = FontWeight.Bold, fontSize = 16.sp)
-                        Text(currentUser?.email ?: "No email", fontSize = 13.sp, color = MaterialTheme.colorScheme.outline)
+                        Text(currentUser?.phoneNumber ?: "No phone", fontSize = 13.sp, color = MaterialTheme.colorScheme.outline)
                     }
                     Surface(
                         color = if (isAdmin) Color(0xFFE8F5E9) else Color(0xFFE0F2F1),
@@ -218,15 +218,15 @@ fun SettingsScreen(
                     }
 
                     Spacer(modifier = Modifier.height(6.dp))
-                    admins.forEach { adminEmail ->
+                    admins.forEach { adminPhone ->
                         Row(
                             modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
                             horizontalArrangement = Arrangement.SpaceBetween,
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Text(adminEmail, fontSize = 13.sp)
-                            if (adminEmail != currentUser?.email) {
-                                IconButton(onClick = { viewModel.removeAdmin(adminEmail) }) {
+                            Text(adminPhone, fontSize = 13.sp)
+                            if (adminPhone != currentUser?.phoneNumber?.filter { it.isDigit() }?.takeLast(10)) {
+                                IconButton(onClick = { viewModel.removeAdmin(adminPhone) }) {
                                     Icon(Icons.Default.Delete, contentDescription = "Revoke Admin", tint = MaterialTheme.colorScheme.error)
                                 }
                             }
@@ -283,15 +283,15 @@ fun SettingsScreen(
     }
 
     if (showAddAdminDialog) {
-        var emailInput by remember { mutableStateOf("") }
+        var phoneInput by remember { mutableStateOf("") }
         AlertDialog(
             onDismissRequest = { showAddAdminDialog = false },
             title = { Text("Grant Admin Access") },
             text = {
                 OutlinedTextField(
-                    value = emailInput,
-                    onValueChange = { emailInput = it },
-                    label = { Text("Member Email Address") },
+                    value = phoneInput,
+                    onValueChange = { phoneInput = it },
+                    label = { Text("Member Mobile Number") },
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth()
                 )
@@ -299,8 +299,8 @@ fun SettingsScreen(
             confirmButton = {
                 Button(
                     onClick = {
-                        if (emailInput.isNotBlank()) {
-                            viewModel.addAdmin(emailInput.trim()) {
+                        if (phoneInput.isNotBlank()) {
+                            viewModel.addAdmin(phoneInput.trim()) {
                                 showAddAdminDialog = false
                             }
                         }

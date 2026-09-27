@@ -34,14 +34,14 @@ function normalizeEmail(raw: unknown): string {
   return raw.trim().toLowerCase();
 }
 
-async function isCallerAdmin(callerEmail: string | undefined): Promise<boolean> {
-  if (!callerEmail) return false;
-  const doc = await db.collection("admins").doc(callerEmail.toLowerCase()).get();
+async function isCallerAdmin(callerPhone: string | undefined): Promise<boolean> {
+  if (!callerPhone) return false;
+  const doc = await db.collection("admins").doc(normalizePhoneDigits(callerPhone)).get();
   return doc.exists && doc.get("isAdmin") === true;
 }
 
 /**
- * Returns { isAdmin: boolean } for the given email.
+ * Returns { isAdmin: boolean } for the given phone number.
  * Requires the caller to be signed in (any signed-in user can check admin status —
  * this only reveals a true/false flag, not the full admin list).
  */
@@ -49,8 +49,8 @@ export const checkIsAdmin = onCall(async (request) => {
   if (!request.auth) {
     throw new HttpsError("unauthenticated", "Sign in required.");
   }
-  const email = normalizeEmail(request.data?.email);
-  const doc = await db.collection("admins").doc(email).get();
+  const phone = normalizePhoneDigits(request.data?.phone);
+  const doc = await db.collection("admins").doc(phone).get();
   const isAdmin = doc.exists && doc.get("isAdmin") === true;
   return { isAdmin };
 });
@@ -70,38 +70,63 @@ export const emailBelongsToMember = onCall(async (request) => {
   return { belongsToMember };
 });
 
+function normalizePhoneDigits(raw: unknown): string {
+  if (typeof raw !== "string" || raw.trim().length === 0) {
+    throw new HttpsError("invalid-argument", "A valid 'phone' string is required.");
+  }
+  // Compare on the last 10 digits so it doesn't matter whether the member
+  // record or the sign-in number includes a country code, spaces, or dashes.
+  return raw.replace(/\D/g, "").slice(-10);
+}
+
 /**
- * Grants admin status to an email. Caller must already be an admin.
+ * Returns { belongsToMember: boolean } for the given phone number.
+ * Deliberately callable WITHOUT authentication — this runs before the user has
+ * an account yet, exactly like emailBelongsToMember. Matches against the
+ * member's `contact` field. Only ever returns a boolean, never member details.
+ */
+export const phoneBelongsToMember = onCall(async (request) => {
+  const phone = normalizePhoneDigits(request.data?.phone);
+  const snapshot = await db.collection("members").get();
+  const belongsToMember = snapshot.docs.some((doc) => {
+    const contact = doc.get("contact") as string | undefined;
+    return contact !== undefined && contact.replace(/\D/g, "").slice(-10) === phone;
+  });
+  return { belongsToMember };
+});
+
+/**
+ * Grants admin status to a phone number. Caller must already be an admin.
  * See the bootstrapping note at the top of this file for the very first admin.
  */
 export const addAdmin = onCall(async (request) => {
-  if (!request.auth?.token?.email) {
+  if (!request.auth?.token?.phone_number) {
     throw new HttpsError("unauthenticated", "Sign in required.");
   }
-  const callerEmail = request.auth.token.email as string;
-  if (!(await isCallerAdmin(callerEmail))) {
+  const callerPhone = request.auth.token.phone_number as string;
+  if (!(await isCallerAdmin(callerPhone))) {
     throw new HttpsError("permission-denied", "Only an existing admin can add another admin.");
   }
-  const email = normalizeEmail(request.data?.email);
-  await db.collection("admins").doc(email).set({ isAdmin: true }, { merge: true });
+  const phone = normalizePhoneDigits(request.data?.phone);
+  await db.collection("admins").doc(phone).set({ isAdmin: true }, { merge: true });
   return { success: true };
 });
 
 /**
- * Revokes admin status from an email. Caller must already be an admin.
+ * Revokes admin status from a phone number. Caller must already be an admin.
  * An admin may remove any admin, including themselves (mirrors the original
  * client-side behavior — add a self-protection check here later if you want to
  * prevent accidentally removing the last admin).
  */
 export const removeAdmin = onCall(async (request) => {
-  if (!request.auth?.token?.email) {
+  if (!request.auth?.token?.phone_number) {
     throw new HttpsError("unauthenticated", "Sign in required.");
   }
-  const callerEmail = request.auth.token.email as string;
-  if (!(await isCallerAdmin(callerEmail))) {
+  const callerPhone = request.auth.token.phone_number as string;
+  if (!(await isCallerAdmin(callerPhone))) {
     throw new HttpsError("permission-denied", "Only an existing admin can remove an admin.");
   }
-  const email = normalizeEmail(request.data?.email);
-  await db.collection("admins").doc(email).delete();
+  const phone = normalizePhoneDigits(request.data?.phone);
+  await db.collection("admins").doc(phone).delete();
   return { success: true };
 });

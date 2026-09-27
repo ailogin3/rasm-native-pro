@@ -68,10 +68,14 @@ class RasmViewModel(application: Application) : AndroidViewModel(application) {
     val admins: StateFlow<List<String>> = repository.getAdminsFlow()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
-    // Currently logged-in member record (matched by email)
+    // Currently logged-in member record (matched by phone number, last 10 digits,
+    // so it doesn't matter whether +91 or spacing differs between the two sides)
+    private fun normalizePhone(raw: String?): String = raw?.filter { it.isDigit() }?.takeLast(10) ?: ""
+
     val currentMember: StateFlow<Member?> = combine(currentUser, members) { user, list ->
-        if (user?.email.isNullOrBlank()) null
-        else list.find { it.email.trim().equals(user!!.email?.trim(), ignoreCase = true) }
+        val phone = normalizePhone(user?.phoneNumber)
+        if (phone.isBlank()) null
+        else list.find { normalizePhone(it.contact) == phone }
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), null)
 
     init {
@@ -80,8 +84,8 @@ class RasmViewModel(application: Application) : AndroidViewModel(application) {
 
     fun checkAdminStatus() {
         viewModelScope.launch {
-            val email = repository.currentUser?.email
-            val adminStatus = repository.checkIsAdmin(email)
+            val phone = repository.currentUser?.phoneNumber
+            val adminStatus = repository.checkIsAdmin(phone)
             _isAdmin.value = adminStatus
             _currentUser.value = repository.currentUser
         }
@@ -119,6 +123,66 @@ class RasmViewModel(application: Application) : AndroidViewModel(application) {
                 onResult(true, null)
             }.onFailure {
                 onResult(false, it.message)
+            }
+        }
+    }
+
+    /** Checks the phone against member records before an OTP is ever sent. */
+    fun checkPhoneIsMember(phone: String, onResult: (Boolean) -> Unit) {
+        viewModelScope.launch {
+            onResult(repository.phoneBelongsToMember(phone))
+        }
+    }
+
+    /**
+     * Sends the OTP. onCodeSent gives the verificationId to hold onto for verifyOtp;
+     * onAutoVerified fires instead, skipping manual code entry, when Play Services
+     * retrieves the code automatically.
+     */
+    fun sendOtp(
+        phoneNumber: String,
+        activity: android.app.Activity,
+        onCodeSent: (String) -> Unit,
+        onAutoVerified: () -> Unit,
+        onError: (String) -> Unit
+    ) {
+        val callbacks = object : com.google.firebase.auth.PhoneAuthProvider.OnVerificationStateChangedCallbacks() {
+            override fun onVerificationCompleted(credential: com.google.firebase.auth.PhoneAuthCredential) {
+                viewModelScope.launch {
+                    repository.signInWithPhoneCredential(credential)
+                        .onSuccess {
+                            _currentUser.value = it
+                            checkAdminStatus()
+                            onAutoVerified()
+                        }
+                        .onFailure { onError(it.message ?: "Verification failed") }
+                }
+            }
+
+            override fun onVerificationFailed(e: com.google.firebase.FirebaseException) {
+                onError(e.message ?: "Could not send OTP. Check the number and try again.")
+            }
+
+            override fun onCodeSent(
+                verificationId: String,
+                token: com.google.firebase.auth.PhoneAuthProvider.ForceResendingToken
+            ) {
+                onCodeSent(verificationId)
+            }
+        }
+        repository.sendOtp(phoneNumber, activity, callbacks)
+    }
+
+    fun verifyOtp(verificationId: String, code: String, onResult: (Boolean, String?) -> Unit) {
+        viewModelScope.launch {
+            val credential = repository.buildOtpCredential(verificationId, code)
+            val res = repository.signInWithPhoneCredential(credential)
+            res.onSuccess {
+                _currentUser.value = it
+                checkAdminStatus()
+                onResult(true, null)
+            }.onFailure {
+                onResult(false, it.message ?: "Invalid OTP. Please try again.")
             }
         }
     }
@@ -573,10 +637,10 @@ class RasmViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    fun addAdmin(email: String, onSuccess: () -> Unit) {
+    fun addAdmin(phone: String, onSuccess: () -> Unit) {
         viewModelScope.launch {
-            repository.addAdmin(email).onSuccess {
-                showMessage("$email is now an admin!")
+            repository.addAdmin(phone).onSuccess {
+                showMessage("$phone is now an admin!")
                 onSuccess()
             }.onFailure {
                 showMessage("Failed to add admin: ${it.message}")
@@ -584,10 +648,10 @@ class RasmViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    fun removeAdmin(email: String) {
+    fun removeAdmin(phone: String) {
         viewModelScope.launch {
-            repository.removeAdmin(email).onSuccess {
-                showMessage("Admin status removed for $email")
+            repository.removeAdmin(phone).onSuccess {
+                showMessage("Admin status removed for $phone")
             }.onFailure {
                 showMessage("Failed to remove admin: ${it.message}")
             }

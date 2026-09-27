@@ -1,5 +1,6 @@
 package com.example.ui.screens
 
+import android.app.Activity
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
@@ -16,15 +17,16 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
-import androidx.compose.ui.text.input.PasswordVisualTransformation
-import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.ui.viewmodel.RasmViewModel
+
+private enum class OtpStep { ENTER_PHONE, ENTER_CODE }
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -32,16 +34,23 @@ fun AuthScreen(
     viewModel: RasmViewModel,
     onAuthSuccess: () -> Unit
 ) {
-    var isSignUp by remember { mutableStateOf(false) }
-    var email by remember { mutableStateOf("") }
-    var password by remember { mutableStateOf("") }
-    var confirmPassword by remember { mutableStateOf("") }
-    var passwordVisible by remember { mutableStateOf(false) }
+    val context = LocalContext.current
+    val activity = context as? Activity
+
+    var step by remember { mutableStateOf(OtpStep.ENTER_PHONE) }
+    var phone by remember { mutableStateOf("") }
+    var otpCode by remember { mutableStateOf("") }
+    var verificationId by remember { mutableStateOf<String?>(null) }
     var errorMessage by remember { mutableStateOf<String?>(null) }
     var isLoading by remember { mutableStateOf(false) }
     var showConfigDialog by remember { mutableStateOf(false) }
 
     val scrollState = rememberScrollState()
+
+    fun toE164(raw: String): String {
+        val trimmed = raw.trim()
+        return if (trimmed.startsWith("+")) trimmed else "+91$trimmed"
+    }
 
     Box(
         modifier = Modifier
@@ -82,7 +91,7 @@ fun AuthScreen(
                     contentAlignment = Alignment.Center
                 ) {
                     Icon(
-                        imageVector = if (isSignUp) Icons.Default.PersonAdd else Icons.Default.Lock,
+                        imageVector = if (step == OtpStep.ENTER_CODE) Icons.Default.Sms else Icons.Default.Phone,
                         contentDescription = null,
                         tint = MaterialTheme.colorScheme.primary,
                         modifier = Modifier.size(36.dp)
@@ -92,17 +101,17 @@ fun AuthScreen(
                 Spacer(modifier = Modifier.height(16.dp))
 
                 Text(
-                    text = if (isSignUp) "Create Account" else "Member Login",
+                    text = if (step == OtpStep.ENTER_CODE) "Enter Code" else "Member Sign In",
                     style = MaterialTheme.typography.headlineSmall,
                     fontWeight = FontWeight.Bold,
                     color = MaterialTheme.colorScheme.onSurface
                 )
 
                 Text(
-                    text = if (isSignUp)
-                        "Use the email registered on your member record"
+                    text = if (step == OtpStep.ENTER_CODE)
+                        "Enter the 6-digit code sent to ${toE164(phone)}"
                     else
-                        "Sign in with your registered email to continue",
+                        "Use the mobile number registered on your member record",
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     textAlign = TextAlign.Center,
@@ -129,170 +138,164 @@ fun AuthScreen(
                     }
                 }
 
-                // Email Input
-                OutlinedTextField(
-                    value = email,
-                    onValueChange = {
-                        email = it
-                        errorMessage = null
-                    },
-                    label = { Text("Email Address") },
-                    leadingIcon = { Icon(Icons.Default.Email, contentDescription = null) },
-                    singleLine = true,
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Email),
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .testTag("auth_email_input"),
-                    shape = RoundedCornerShape(12.dp)
-                )
-
-                Spacer(modifier = Modifier.height(16.dp))
-
-                // Password Input
-                OutlinedTextField(
-                    value = password,
-                    onValueChange = {
-                        password = it
-                        errorMessage = null
-                    },
-                    label = { Text("Password") },
-                    leadingIcon = { Icon(Icons.Default.VpnKey, contentDescription = null) },
-                    trailingIcon = {
-                        IconButton(onClick = { passwordVisible = !passwordVisible }) {
-                            Icon(
-                                imageVector = if (passwordVisible) Icons.Default.VisibilityOff else Icons.Default.Visibility,
-                                contentDescription = if (passwordVisible) "Hide password" else "Show password"
-                            )
-                        }
-                    },
-                    singleLine = true,
-                    visualTransformation = if (passwordVisible) VisualTransformation.None else PasswordVisualTransformation(),
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .testTag("auth_password_input"),
-                    shape = RoundedCornerShape(12.dp)
-                )
-
-                // Confirm Password (Signup only)
-                if (isSignUp) {
-                    Spacer(modifier = Modifier.height(16.dp))
+                if (step == OtpStep.ENTER_PHONE) {
+                    // Phone Input
                     OutlinedTextField(
-                        value = confirmPassword,
+                        value = phone,
                         onValueChange = {
-                            confirmPassword = it
+                            phone = it
                             errorMessage = null
                         },
-                        label = { Text("Confirm Password") },
-                        leadingIcon = { Icon(Icons.Default.VpnKey, contentDescription = null) },
+                        label = { Text("Mobile Number") },
+                        placeholder = { Text("9876543210 or +919876543210") },
+                        leadingIcon = { Icon(Icons.Default.Phone, contentDescription = null) },
                         singleLine = true,
-                        visualTransformation = if (passwordVisible) VisualTransformation.None else PasswordVisualTransformation(),
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone),
                         modifier = Modifier
                             .fillMaxWidth()
-                            .testTag("auth_confirm_password_input"),
+                            .testTag("auth_phone_input"),
                         shape = RoundedCornerShape(12.dp)
                     )
-                }
 
-                Spacer(modifier = Modifier.height(24.dp))
+                    Spacer(modifier = Modifier.height(24.dp))
 
-                // Submit Button
-                Button(
-                    onClick = {
-                        if (email.isBlank() || password.isBlank()) {
-                            errorMessage = "Please fill in all fields"
-                            return@Button
-                        }
-                        if (isSignUp) {
-                            if (password != confirmPassword) {
-                                errorMessage = "Passwords do not match"
+                    // Send OTP Button
+                    Button(
+                        onClick = {
+                            val digitsOnly = phone.filter { it.isDigit() }
+                            if (digitsOnly.length < 10) {
+                                errorMessage = "Enter a valid mobile number"
                                 return@Button
                             }
-                            if (password.length < 6) {
-                                errorMessage = "Password must be at least 6 characters"
+                            val e164 = toE164(phone)
+                            val act = activity
+                            if (act == null) {
+                                errorMessage = "Unable to start verification here"
                                 return@Button
                             }
                             isLoading = true
-                            viewModel.signup(email, password) { success, err ->
-                                isLoading = false
-                                if (success) {
-                                    onAuthSuccess()
+                            viewModel.checkPhoneIsMember(e164) { isMember ->
+                                if (!isMember) {
+                                    isLoading = false
+                                    errorMessage = "This number is not registered as a member. Please contact your association administrator to add you first."
                                 } else {
-                                    errorMessage = err ?: "Signup failed"
+                                    viewModel.sendOtp(
+                                        phoneNumber = e164,
+                                        activity = act,
+                                        onCodeSent = { vid ->
+                                            isLoading = false
+                                            verificationId = vid
+                                            step = OtpStep.ENTER_CODE
+                                        },
+                                        onAutoVerified = {
+                                            isLoading = false
+                                            onAuthSuccess()
+                                        },
+                                        onError = { msg ->
+                                            isLoading = false
+                                            errorMessage = msg
+                                        }
+                                    )
                                 }
                             }
+                        },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(52.dp)
+                            .testTag("auth_send_otp_button"),
+                        enabled = !isLoading,
+                        shape = RoundedCornerShape(12.dp),
+                        colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
+                    ) {
+                        if (isLoading) {
+                            CircularProgressIndicator(
+                                color = MaterialTheme.colorScheme.onPrimary,
+                                modifier = Modifier.size(24.dp),
+                                strokeWidth = 2.dp
+                            )
                         } else {
+                            Text(
+                                text = "Send OTP",
+                                fontSize = 16.sp,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                        }
+                    }
+                } else {
+                    // OTP Code Input
+                    OutlinedTextField(
+                        value = otpCode,
+                        onValueChange = {
+                            otpCode = it
+                            errorMessage = null
+                        },
+                        label = { Text("6-Digit Code") },
+                        leadingIcon = { Icon(Icons.Default.Sms, contentDescription = null) },
+                        singleLine = true,
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .testTag("auth_otp_input"),
+                        shape = RoundedCornerShape(12.dp)
+                    )
+
+                    Spacer(modifier = Modifier.height(24.dp))
+
+                    // Verify Button
+                    Button(
+                        onClick = {
+                            val vid = verificationId
+                            if (otpCode.isBlank() || vid == null) {
+                                errorMessage = "Enter the code sent to your phone"
+                                return@Button
+                            }
                             isLoading = true
-                            viewModel.login(email, password) { success, err ->
+                            viewModel.verifyOtp(vid, otpCode.trim()) { success, err ->
                                 isLoading = false
                                 if (success) {
                                     onAuthSuccess()
                                 } else {
-                                    errorMessage = err ?: "Login failed. Check your email and password."
+                                    errorMessage = err ?: "Invalid OTP"
                                 }
                             }
+                        },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(52.dp)
+                            .testTag("auth_verify_otp_button"),
+                        enabled = !isLoading,
+                        shape = RoundedCornerShape(12.dp),
+                        colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
+                    ) {
+                        if (isLoading) {
+                            CircularProgressIndicator(
+                                color = MaterialTheme.colorScheme.onPrimary,
+                                modifier = Modifier.size(24.dp),
+                                strokeWidth = 2.dp
+                            )
+                        } else {
+                            Text(
+                                text = "Verify & Sign In",
+                                fontSize = 16.sp,
+                                fontWeight = FontWeight.SemiBold
+                            )
                         }
-                    },
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(52.dp)
-                        .testTag("auth_submit_button"),
-                    enabled = !isLoading,
-                    shape = RoundedCornerShape(12.dp),
-                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
-                ) {
-                    if (isLoading) {
-                        CircularProgressIndicator(
-                            color = MaterialTheme.colorScheme.onPrimary,
-                            modifier = Modifier.size(24.dp),
-                            strokeWidth = 2.dp
-                        )
-                    } else {
-                        Text(
-                            text = if (isSignUp) "Create Account" else "Sign In",
-                            fontSize = 16.sp,
-                            fontWeight = FontWeight.SemiBold
-                        )
                     }
-                }
 
-                Spacer(modifier = Modifier.height(16.dp))
+                    Spacer(modifier = Modifier.height(16.dp))
 
-                // Toggle between Login and Signup
-                TextButton(
-                    onClick = {
-                        isSignUp = !isSignUp
-                        errorMessage = null
-                    }
-                ) {
-                    Text(
-                        text = if (isSignUp)
-                            "Already have an account? Sign In"
-                        else
-                            "First time? Create your account",
-                        color = MaterialTheme.colorScheme.primary,
-                        fontWeight = FontWeight.SemiBold
-                    )
-                }
-
-                // Forgot Password link
-                if (!isSignUp) {
                     TextButton(
                         onClick = {
-                            if (email.isBlank()) {
-                                errorMessage = "Enter your email address above, then tap Forgot Password"
-                            } else {
-                                viewModel.forgotPassword(email) { ok, msg ->
-                                    errorMessage = msg
-                                }
-                            }
+                            step = OtpStep.ENTER_PHONE
+                            otpCode = ""
+                            verificationId = null
+                            errorMessage = null
                         }
                     ) {
                         Text(
-                            text = "Forgot password?",
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            style = MaterialTheme.typography.bodySmall
+                            text = "Change number",
+                            color = MaterialTheme.colorScheme.primary,
+                            fontWeight = FontWeight.SemiBold
                         )
                     }
                 }
