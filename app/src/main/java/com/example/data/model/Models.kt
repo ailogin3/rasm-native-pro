@@ -231,7 +231,8 @@ data class AssociationSettings(
     val associationRegNo: String = "",
     val associationLocation: String = "",
     val monthlyFee: Long = 500L,
-    val initialBankBalance: Long = 0L
+    val initialBankBalance: Long = 0L,
+    val initialCashBalance: Long = 0L
 )
 
 data class OfficeBearers(
