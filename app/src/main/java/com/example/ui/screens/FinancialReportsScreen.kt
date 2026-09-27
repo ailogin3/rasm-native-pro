@@ -47,6 +47,26 @@ import java.util.TimeZone
 // as plain strings, so period filtering is a simple string comparison.
 // ---------------------------------------------------------------------------------------------
 
+// ---------------------------------------------------------------------------------------------
+// Bank-transaction effects. Mirrors the table in BankTxType's doc comment:
+//   Deposit         bank +, cash -   Withdrawal      bank -, cash +
+//   Interest        bank +           Adjustment In   bank +
+//   Adjustment Out  bank -           Transfer In     bank +
+//   Transfer Out    bank -
+// Cash is only ever touched by a Deposit or a Withdrawal; everything else is bank-only.
+// ---------------------------------------------------------------------------------------------
+
+private fun BankTransaction.bankDelta(): Long = when (BankTxType.canonical(transactionType)) {
+    BankTxType.WITHDRAWAL, BankTxType.ADJUSTMENT_OUT, BankTxType.TRANSFER_OUT -> -amount
+    else -> amount
+}
+
+private fun BankTransaction.cashDelta(): Long = when (BankTxType.canonical(transactionType)) {
+    BankTxType.DEPOSIT -> -amount
+    BankTxType.WITHDRAWAL -> amount
+    else -> 0L
+}
+
 private val DATE_RE = Regex("""\d{4}-\d{2}-\d{2}""")
 
 private fun utcFormat() = SimpleDateFormat("yyyy-MM-dd", Locale.US).apply { timeZone = TimeZone.getTimeZone("UTC") }
