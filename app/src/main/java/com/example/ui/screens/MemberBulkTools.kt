@@ -101,8 +101,12 @@ fun MemberBulkTools(
                     if (member == null) {
                         unmatched.add(fileName)
                     } else {
-                        val encoded = withContext(Dispatchers.IO) { ImageUtils.encodeUriToBase64(uri, context) }
-                        if (encoded != null && viewModel.setMemberPhoto(member, encoded)) matched++ else failed.add(fileName)
+                        val uploaded = withContext(Dispatchers.IO) {
+                            runCatching {
+                                ImageUtils.uploadPhotoToStorage(uri, context, ImageUtils.memberPhotoPath(member.docId))
+                            }.getOrNull()
+                        }
+                        if (uploaded != null && viewModel.setMemberPhoto(member, uploaded)) matched++ else failed.add(fileName)
                     }
                 }
                 photoStatus = null
