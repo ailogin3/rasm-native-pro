@@ -174,29 +174,36 @@ fun AuthScreen(
                                 return@Button
                             }
                             isLoading = true
-                            viewModel.checkPhoneIsMember(e164) { isMember ->
-                                if (!isMember) {
-                                    isLoading = false
-                                    errorMessage = "This number is not registered as a member. Please contact your association administrator to add you first."
-                                } else {
-                                    viewModel.sendOtp(
-                                        phoneNumber = e164,
-                                        activity = act,
-                                        onCodeSent = { vid ->
-                                            isLoading = false
-                                            verificationId = vid
-                                            step = OtpStep.ENTER_CODE
-                                        },
-                                        onAutoVerified = {
-                                            isLoading = false
-                                            onAuthSuccess()
-                                        },
-                                        onError = { msg ->
-                                            isLoading = false
-                                            errorMessage = msg
-                                        }
-                                    )
-                                }
+                            // TEMP-SPARK-TESTING: real gate is `viewModel.checkPhoneIsMember`, which calls a
+                            // Cloud Function and needs the Blaze plan. Bypassed here so the OTP flow can be
+                            // exercised on Spark. REVERT to the block below once the project is on Blaze:
+                            //
+                            // viewModel.checkPhoneIsMember(e164) { isMember ->
+                            //     if (!isMember) {
+                            //         isLoading = false
+                            //         errorMessage = "This number is not registered as a member. Please contact your association administrator to add you first."
+                            //     } else {
+                            //         viewModel.sendOtp(...)
+                            //     }
+                            // }
+                            run {
+                                viewModel.sendOtp(
+                                    phoneNumber = e164,
+                                    activity = act,
+                                    onCodeSent = { vid ->
+                                        isLoading = false
+                                        verificationId = vid
+                                        step = OtpStep.ENTER_CODE
+                                    },
+                                    onAutoVerified = {
+                                        isLoading = false
+                                        onAuthSuccess()
+                                    },
+                                    onError = { msg ->
+                                        isLoading = false
+                                        errorMessage = msg
+                                    }
+                                )
                             }
                         },
                         modifier = Modifier
