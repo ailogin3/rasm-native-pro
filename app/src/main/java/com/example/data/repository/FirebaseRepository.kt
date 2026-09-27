@@ -224,7 +224,7 @@ class FirebaseRepository(private val context: Context) {
     ) {
         val auth = getAuth()
         if (auth == null) {
-            callbacks.onVerificationFailed(Exception("Firebase is not initialized"))
+            callbacks.onVerificationFailed(com.google.firebase.FirebaseException("Firebase is not initialized"))
             return
         }
         val options = com.google.firebase.auth.PhoneAuthOptions.newBuilder(auth)
