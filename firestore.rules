@@ -19,13 +19,13 @@ service cloud.firestore {
 
     function isAdmin() {
       return signedIn() &&
-        exists(/databases/$(database)/documents/admins/$(request.auth.token.email.lower()));
+        exists(/databases/$(database)/documents/admins/$(request.auth.token.phone_number));
     }
 
     // Only Cloud Functions (Admin SDK) can ever write this collection.
     // Authenticated clients may still read it, so the existing real-time
     // "current admins" list in Settings keeps working.
-    match /admins/{email} {
+    match /admins/{phone} {
       allow read: if signedIn();
       allow write: if false;
     }
@@ -66,9 +66,26 @@ service cloud.firestore {
       allow read: if signedIn();
       allow write: if isAdmin();
     }
+    match /bankAccounts/{docId} {
+      allow read: if signedIn();
+      allow write: if isAdmin();
+    }
     match /activityLog/{docId} {
       allow read: if isAdmin();
       allow write: if isAdmin();
+    }
+
+    // Notices: every signed-in member can read them, only admins can post / edit / delete.
+    match /notices/{docId} {
+      allow read: if signedIn();
+      allow write: if isAdmin();
+    }
+
+    // App-version doc for the in-app update banner: publicly readable (checked
+    // before sign-in isn't required here, but keeping it simple), never client-writable.
+    match /app_config/{docId} {
+      allow read: if true;
+      allow write: if false;
     }
 
     // Events & meetings: readable by all signed-in members, writable by admins.

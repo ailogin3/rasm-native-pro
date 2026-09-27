@@ -167,6 +167,8 @@ fun SettingsScreen(
                 }
             }
 
+            BankAccountsCard(viewModel)
+
             // Executive Committee Card
             Card(
                 shape = RoundedCornerShape(16.dp),
@@ -225,7 +227,7 @@ fun SettingsScreen(
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             Text(adminPhone, fontSize = 13.sp)
-                            if (adminPhone != currentUser?.phoneNumber?.filter { it.isDigit() }?.takeLast(10)) {
+                            if (adminPhone != currentUser?.phoneNumber) {
                                 IconButton(onClick = { viewModel.removeAdmin(adminPhone) }) {
                                     Icon(Icons.Default.Delete, contentDescription = "Revoke Admin", tint = MaterialTheme.colorScheme.error)
                                 }

@@ -34,9 +34,25 @@ function normalizeEmail(raw: unknown): string {
   return raw.trim().toLowerCase();
 }
 
+/**
+ * E.164 form (e.g. "+919876543210"), matching exactly what Firebase Auth puts in
+ * request.auth.token.phone_number — used ONLY for admin doc IDs, so firestore.rules
+ * can check admin status with a plain exists() and no string manipulation. Assumes
+ * India (+91) when no country code is given, matching the sign-in screen's default.
+ */
+function toE164India(raw: unknown): string {
+  if (typeof raw !== "string" || raw.trim().length === 0) {
+    throw new HttpsError("invalid-argument", "A valid 'phone' string is required.");
+  }
+  const trimmed = raw.trim();
+  if (trimmed.startsWith("+")) return trimmed;
+  const digits = trimmed.replace(/\D/g, "").slice(-10);
+  return `+91${digits}`;
+}
+
 async function isCallerAdmin(callerPhone: string | undefined): Promise<boolean> {
   if (!callerPhone) return false;
-  const doc = await db.collection("admins").doc(normalizePhoneDigits(callerPhone)).get();
+  const doc = await db.collection("admins").doc(toE164India(callerPhone)).get();
   return doc.exists && doc.get("isAdmin") === true;
 }
 
@@ -49,7 +65,7 @@ export const checkIsAdmin = onCall(async (request) => {
   if (!request.auth) {
     throw new HttpsError("unauthenticated", "Sign in required.");
   }
-  const phone = normalizePhoneDigits(request.data?.phone);
+  const phone = toE164India(request.data?.phone);
   const doc = await db.collection("admins").doc(phone).get();
   const isAdmin = doc.exists && doc.get("isAdmin") === true;
   return { isAdmin };
@@ -107,7 +123,7 @@ export const addAdmin = onCall(async (request) => {
   if (!(await isCallerAdmin(callerPhone))) {
     throw new HttpsError("permission-denied", "Only an existing admin can add another admin.");
   }
-  const phone = normalizePhoneDigits(request.data?.phone);
+  const phone = toE164India(request.data?.phone);
   await db.collection("admins").doc(phone).set({ isAdmin: true }, { merge: true });
   return { success: true };
 });
@@ -126,7 +142,7 @@ export const removeAdmin = onCall(async (request) => {
   if (!(await isCallerAdmin(callerPhone))) {
     throw new HttpsError("permission-denied", "Only an existing admin can remove an admin.");
   }
-  const phone = normalizePhoneDigits(request.data?.phone);
+  const phone = toE164India(request.data?.phone);
   await db.collection("admins").doc(phone).delete();
   return { success: true };
 });

@@ -14,6 +14,12 @@ import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import com.example.data.remote.AppVersionInfo
+import com.example.data.remote.FirebaseAppVersionApi
+
+/** Marks a zero-amount maintenance record created by bulk member import to record a pre-import "paid upto" balance. */
+const val MIGRATED_RECEIPT = "MIGRATED"
+const val MIGRATED_START_MONTH = "January 2000"
 
 class RasmViewModel(application: Application) : AndroidViewModel(application) {
 
@@ -68,6 +74,15 @@ class RasmViewModel(application: Application) : AndroidViewModel(application) {
     val admins: StateFlow<List<String>> = repository.getAdminsFlow()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
+    val notices: StateFlow<List<Notice>> = repository.getNoticesFlow()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    val bankAccounts: StateFlow<List<BankAccount>> = repository.getBankAccountsFlow()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    /** This app has no separate treasurer role, so "can handle money entries" is just admin. */
+    val canManageMoney: StateFlow<Boolean> get() = isAdmin
+
     // Currently logged-in member record (matched by phone number, last 10 digits,
     // so it doesn't matter whether +91 or spacing differs between the two sides)
     private fun normalizePhone(raw: String?): String = raw?.filter { it.isDigit() }?.takeLast(10) ?: ""
@@ -78,8 +93,41 @@ class RasmViewModel(application: Application) : AndroidViewModel(application) {
         else list.find { normalizePhone(it.contact) == phone }
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), null)
 
+    // Update banner (see FirebaseAppVersionApi) -- _appVersionInfo is null
+    // until the first fetch resolves (or fails, silently). Dismissing is
+    // per-session only (not persisted), so the banner reappears on the
+    // next cold start until the member actually updates.
+    private val _appVersionInfo = MutableStateFlow<AppVersionInfo?>(null)
+    val appVersionInfo: StateFlow<AppVersionInfo?> = _appVersionInfo.asStateFlow()
+
+    private val _updateBannerDismissed = MutableStateFlow(false)
+    val showUpdateBanner: StateFlow<Boolean> = combine(
+        _appVersionInfo, _updateBannerDismissed
+    ) { info, dismissed ->
+        !dismissed && info != null && info.latestVersionCode > com.example.BuildConfig.VERSION_CODE
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), false)
+
+    fun dismissUpdateBanner() {
+        _updateBannerDismissed.value = true
+    }
+
+    /**
+     * Re-checks for a new version. Called from MainApp on every app
+     * foreground (not just cold start via init{}), so a member who keeps
+     * the app running in the background still sees a banner you publish
+     * while their session is alive, without needing to force-close it.
+     */
+    fun refreshUpdateCheck() {
+        viewModelScope.launch {
+            _appVersionInfo.value = FirebaseAppVersionApi.fetchLatestVersion()
+        }
+    }
+
     init {
         checkAdminStatus()
+        viewModelScope.launch {
+            _appVersionInfo.value = FirebaseAppVersionApi.fetchLatestVersion()
+        }
     }
 
     fun checkAdminStatus() {
@@ -129,12 +177,10 @@ class RasmViewModel(application: Application) : AndroidViewModel(application) {
 
     /** Checks the phone against member records before an OTP is ever sent. */
     fun checkPhoneIsMember(phone: String, onResult: (Boolean) -> Unit) {
-    // TEMP BYPASS FOR TESTING (Spark plan, Cloud Functions need Blaze to deploy):
-    onResult(true); return
-    viewModelScope.launch {
-        onResult(repository.phoneBelongsToMember(phone))
+        viewModelScope.launch {
+            onResult(repository.phoneBelongsToMember(phone))
+        }
     }
-}
 
     /**
      * Sends the OTP. onCodeSent gives the verificationId to hold onto for verifyOtp;
@@ -433,6 +479,52 @@ class RasmViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    fun updateBankTransaction(tx: BankTransaction, onSuccess: () -> Unit) {
+        viewModelScope.launch {
+            repository.updateBankTransaction(tx).onSuccess {
+                showMessage("Bank transaction updated")
+                onSuccess()
+            }.onFailure {
+                showMessage("Error updating bank transaction: ${it.message}")
+            }
+        }
+    }
+
+    fun recordBankTransfer(
+        from: String,
+        to: String,
+        amount: Long,
+        date: String,
+        transactionId: String,
+        remarks: String,
+        onSuccess: () -> Unit
+    ) {
+        if (from == to) {
+            showMessage("Choose two different accounts")
+            return
+        }
+        viewModelScope.launch {
+            repository.recordBankTransfer(from, to, amount, date, transactionId, remarks).onSuccess {
+                showMessage("Transfer recorded")
+                onSuccess()
+            }.onFailure {
+                showMessage("Failed to record transfer: ${it.message}")
+            }
+        }
+    }
+
+    /** Deletes a transfer: both of its entries go together so the accounts never get out of step. */
+    fun deleteBankTransfer(legs: List<BankTransaction>) {
+        if (legs.isEmpty()) return
+        viewModelScope.launch {
+            repository.deleteBankTransferLegs(legs.map { it.docId }, legs.first().amount).onSuccess {
+                showMessage("Transfer deleted")
+            }.onFailure {
+                showMessage("Failed to delete transfer: ${it.message}")
+            }
+        }
+    }
+
     fun recordDonation(donation: Donation, onSuccess: () -> Unit) {
         viewModelScope.launch {
             repository.recordDonation(donation).onSuccess {
@@ -440,6 +532,17 @@ class RasmViewModel(application: Application) : AndroidViewModel(application) {
                 onSuccess()
             }.onFailure {
                 showMessage("Error recording donation: ${it.message}")
+            }
+        }
+    }
+
+    fun updateDonation(donation: Donation, onSuccess: () -> Unit) {
+        viewModelScope.launch {
+            repository.updateDonation(donation).onSuccess {
+                showMessage("Donation updated")
+                onSuccess()
+            }.onFailure {
+                showMessage("Error updating donation: ${it.message}")
             }
         }
     }
@@ -471,6 +574,180 @@ class RasmViewModel(application: Application) : AndroidViewModel(application) {
                 showMessage("Expense record deleted")
             }.onFailure {
                 showMessage("Error deleting expense: ${it.message}")
+            }
+        }
+    }
+
+    fun updateGeneralExpense(expense: GeneralExpense, onSuccess: () -> Unit) {
+        viewModelScope.launch {
+            repository.updateGeneralExpense(expense).onSuccess {
+                showMessage("Expense updated")
+                onSuccess()
+            }.onFailure {
+                showMessage("Error updating expense: ${it.message}")
+            }
+        }
+    }
+
+    // ----------------------------------------------------
+    // NOTICES (admin only to post / edit / delete)
+    // ----------------------------------------------------
+
+    fun postNotice(title: String, body: String, pinned: Boolean, onSuccess: () -> Unit) {
+        if (!_isAdmin.value) return
+        viewModelScope.launch {
+            val notice = Notice(
+                title = title,
+                body = body,
+                pinned = pinned,
+                postedBy = currentMember.value?.name?.takeIf { it.isNotBlank() } ?: (repository.currentUser?.phoneNumber ?: "Admin"),
+                createdAt = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", Locale.US).format(Date())
+            )
+            repository.addNotice(notice).onSuccess {
+                showMessage("Notice posted")
+                onSuccess()
+            }.onFailure {
+                showMessage("Failed to post notice: ${it.message}")
+            }
+        }
+    }
+
+    fun updateNotice(notice: Notice, onSuccess: () -> Unit) {
+        if (!_isAdmin.value) return
+        viewModelScope.launch {
+            repository.updateNotice(notice).onSuccess {
+                showMessage("Notice updated")
+                onSuccess()
+            }.onFailure {
+                showMessage("Failed to update notice: ${it.message}")
+            }
+        }
+    }
+
+    fun deleteNotice(notice: Notice) {
+        if (!_isAdmin.value) return
+        viewModelScope.launch {
+            repository.deleteNotice(notice).onSuccess {
+                showMessage("Notice deleted")
+            }.onFailure {
+                showMessage("Failed to delete notice: ${it.message}")
+            }
+        }
+    }
+
+    // ----------------------------------------------------
+    // BULK MEMBER IMPORT (admin only)
+    // ----------------------------------------------------
+
+    /**
+     * Adds the given, already-checked rows one by one. A row with a "paid upto" month also gets the same
+     * zero-amount "migrated" entry that Set Paid-Upto creates. Calls [onProgress] after every row.
+     */
+    fun importMembers(
+        rows: List<com.example.util.MemberImportRow>,
+        onProgress: (done: Int, total: Int) -> Unit,
+        onDone: (added: Int, failures: List<String>) -> Unit
+    ) {
+        if (!_isAdmin.value) return
+        viewModelScope.launch {
+            var added = 0
+            val failures = mutableListOf<String>()
+            val today = SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Date())
+            val stamp = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", Locale.US).format(Date())
+            rows.forEachIndexed { index, row ->
+                val member = Member(
+                    name = row.name,
+                    contact = row.contact,
+                    email = row.email,
+                    memberType = row.memberType,
+                    gender = row.gender,
+                    joinDate = row.joinDate
+                )
+                val result = repository.addMember(member)
+                if (result.isSuccess) {
+                    added++
+                    val upto = row.paidUpto
+                    if (upto != null) {
+                        val record = MaintenanceCollection(
+                            memberId = result.getOrNull().orEmpty(),
+                            contact = row.contact,
+                            amount = 0L,
+                            date = today,
+                            period = 0,
+                            startMonth = MIGRATED_START_MONTH,
+                            endMonth = upto,
+                            receiptNumber = MIGRATED_RECEIPT,
+                            timestamp = stamp
+                        )
+                        val paid = repository.recordMaintenancePayment(record)
+                        if (paid.isFailure) {
+                            failures.add("Line ${row.line} (${row.name}): added, but paid-upto failed - ${paid.exceptionOrNull()?.message}")
+                        }
+                    }
+                } else {
+                    failures.add("Line ${row.line} (${row.name}): ${result.exceptionOrNull()?.message}")
+                }
+                onProgress(index + 1, rows.size)
+            }
+            repository.logActivity("Bulk imported members", "$added of ${rows.size} members added")
+            onDone(added, failures)
+        }
+    }
+
+    /** Saves an already-compressed photo (data URL) on a member. Used by the bulk photo import. */
+    suspend fun setMemberPhoto(member: Member, photo: String): Boolean {
+        if (!_isAdmin.value) return false
+        return repository.updateMember(member.copy(photo = photo)).isSuccess
+    }
+
+    // ----------------------------------------------------
+    // BANK ACCOUNTS
+    // ----------------------------------------------------
+
+    fun addBankAccount(name: String, openingBalance: Long, onSuccess: () -> Unit) {
+        if (!_isAdmin.value) return
+        val clean = name.trim()
+        if (clean.isBlank()) {
+            showMessage("Enter a name for the bank account")
+            return
+        }
+        if (bankAccounts.value.any { it.name.equals(clean, ignoreCase = true) }) {
+            showMessage("A bank account named \"$clean\" already exists")
+            return
+        }
+        viewModelScope.launch {
+            repository.addBankAccount(clean, openingBalance).onSuccess {
+                showMessage("Bank account added")
+                onSuccess()
+            }.onFailure {
+                showMessage("Failed to add bank account: ${it.message}")
+            }
+        }
+    }
+
+    fun updateBankAccountOpening(account: BankAccount, openingBalance: Long, onSuccess: () -> Unit) {
+        if (!_isAdmin.value) return
+        viewModelScope.launch {
+            repository.updateBankAccountOpening(account, openingBalance).onSuccess {
+                showMessage("Opening balance updated")
+                onSuccess()
+            }.onFailure {
+                showMessage("Failed to update: ${it.message}")
+            }
+        }
+    }
+
+    fun deleteBankAccount(account: BankAccount) {
+        if (!_isAdmin.value) return
+        if (bankTransactions.value.any { it.bankAccount == account.name }) {
+            showMessage("\"${account.name}\" already has bank entries, so it can't be deleted")
+            return
+        }
+        viewModelScope.launch {
+            repository.deleteBankAccount(account).onSuccess {
+                showMessage("Bank account deleted")
+            }.onFailure {
+                showMessage("Failed to delete: ${it.message}")
             }
         }
     }

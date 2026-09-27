@@ -74,12 +74,74 @@ data class EventCollection(
 
 data class BankTransaction(
     val docId: String = "",
-    val transactionType: String = "deposit", // deposit or withdrawal
+    val transactionType: String = "deposit", // see BankTxType (matching ignores upper/lower case)
     val amount: Long = 0L,
     val date: String = "",
     val transactionId: String = "",
-    val remarks: String = ""
+    val remarks: String = "",
+    /** Name of the bank account this entry belongs to. Blank when the association has no bank accounts set up. */
+    val bankAccount: String = "",
+    /** Same value on both entries of a transfer between two accounts, so they are handled together. */
+    val transferId: String = ""
 )
+
+/** One bank account of the association, with the balance it held before the first entry in this app. */
+data class BankAccount(
+    val docId: String = "",
+    val name: String = "",
+    val openingBalance: Long = 0L
+)
+
+/**
+ * Kinds of bank-log entry and what each one does to the two balances.
+ *
+ *  Deposit         bank +, cash -   (cash taken from hand to the bank)
+ *  Withdrawal      bank -, cash +   (cash taken from the bank to hand)
+ *  Interest        bank +           (credited by the bank; counts as income, never was cash)
+ *  Adjustment In   bank +           (correction only: no cash, no income)
+ *  Adjustment Out  bank -           (bank charges / correction only: no cash, no expense)
+ *  Transfer Out    bank -           (money moved to another bank account; not an expense)
+ *  Transfer In     bank +           (money received from another bank account; not income)
+ */
+object BankTxType {
+    const val DEPOSIT = "Deposit"
+    const val WITHDRAWAL = "Withdrawal"
+    const val INTEREST = "Interest"
+    const val ADJUSTMENT_IN = "Adjustment In"
+    const val ADJUSTMENT_OUT = "Adjustment Out"
+    const val TRANSFER_IN = "Transfer In"
+    const val TRANSFER_OUT = "Transfer Out"
+
+    /** Only a choice in the entry form: saved as a Transfer Out on one account plus a Transfer In on the other. */
+    const val TRANSFER = "Transfer"
+
+    /** Every type that can be stored. */
+    val ALL = listOf(DEPOSIT, WITHDRAWAL, INTEREST, ADJUSTMENT_IN, ADJUSTMENT_OUT, TRANSFER_IN, TRANSFER_OUT)
+
+    /** What the entry form offers. */
+    val ENTRY_CHOICES = listOf(DEPOSIT, WITHDRAWAL, INTEREST, ADJUSTMENT_IN, ADJUSTMENT_OUT, TRANSFER)
+
+    fun isTransfer(type: String): Boolean {
+        val c = canonical(type)
+        return c == TRANSFER_IN || c == TRANSFER_OUT
+    }
+
+    /** Old records may be stored as "deposit" / "withdrawal"; this maps any casing to the canonical label. */
+    fun canonical(raw: String): String =
+        ALL.firstOrNull { it.equals(raw.trim(), ignoreCase = true) } ?: raw
+
+    fun needsRemarks(type: String) = type == ADJUSTMENT_IN || type == ADJUSTMENT_OUT
+
+    fun describe(type: String): String = when (type) {
+        DEPOSIT -> "Cash moves from hand into the bank."
+        WITHDRAWAL -> "Cash moves from the bank into hand."
+        INTEREST -> "Interest credited by the bank. Adds to the bank balance and to income."
+        ADJUSTMENT_IN -> "Correction that adds to the bank balance only (no cash, no income). Remarks required."
+        ADJUSTMENT_OUT -> "Bank charges or a correction that reduces the bank balance only. Remarks required."
+        TRANSFER -> "Moves money from one bank account to another. Not income or expense; the total bank balance stays the same."
+        else -> ""
+    }
+}
 
 data class Meeting(
     val docId: String = "",
@@ -195,3 +257,16 @@ data class MeetingPhoto(
     val data: String = "",      // Base64 JPEG data URL
     val createdAt: Long = 0L
 )
+
+/** A notice posted by an admin for all members. [createdAt] is "yyyy-MM-dd'T'HH:mm:ss'Z'" and is used for ordering. */
+data class Notice(
+    val docId: String = "",
+    val title: String = "",
+    val body: String = "",
+    val pinned: Boolean = false,
+    val postedBy: String = "",
+    val createdAt: String = ""
+) {
+    /** "2026-09-21" part of [createdAt]. */
+    val date: String get() = createdAt.take(10)
+}

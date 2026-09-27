@@ -168,14 +168,12 @@ fun AuthScreen(
                                 return@Button
                             }
                             val e164 = toE164(phone)
-errorMessage = "DEBUG e164=[$e164] length=${e164.length}"
-return@Button
-val act = activity
-if (act == null) {
-    errorMessage = "Unable to start verification here"
-    return@Button
-}
-isLoading = true
+                            val act = activity
+                            if (act == null) {
+                                errorMessage = "Unable to start verification here"
+                                return@Button
+                            }
+                            isLoading = true
                             viewModel.checkPhoneIsMember(e164) { isMember ->
                                 if (!isMember) {
                                     isLoading = false

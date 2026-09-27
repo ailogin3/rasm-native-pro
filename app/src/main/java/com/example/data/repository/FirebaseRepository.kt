@@ -224,7 +224,7 @@ class FirebaseRepository(private val context: Context) {
     ) {
         val auth = getAuth()
         if (auth == null) {
-            callbacks.onVerificationFailed(com.google.firebase.FirebaseException("Firebase is not initialized"))
+            callbacks.onVerificationFailed(Exception("Firebase is not initialized"))
             return
         }
         val options = com.google.firebase.auth.PhoneAuthOptions.newBuilder(auth)
@@ -572,7 +572,9 @@ class FirebaseRepository(private val context: Context) {
                             amount = doc.getLong("amount") ?: 0L,
                             date = doc.getString("date") ?: "",
                             transactionId = doc.getString("transactionId") ?: "",
-                            remarks = doc.getString("remarks") ?: ""
+                            remarks = doc.getString("remarks") ?: "",
+                            bankAccount = doc.getString("bankAccount") ?: "",
+                            transferId = doc.getString("transferId") ?: ""
                         )
                     } catch (e: Exception) {
                         null
@@ -1070,11 +1072,93 @@ class FirebaseRepository(private val context: Context) {
                 "amount" to bt.amount,
                 "date" to bt.date,
                 "transactionId" to bt.transactionId,
-                "remarks" to bt.remarks
+                "remarks" to bt.remarks,
+                "bankAccount" to bt.bankAccount
             )
             docRef.set(map).await()
-            logActivity("Recorded bank ${bt.transactionType}", "₹${bt.amount}${if (bt.remarks.isNotBlank()) " - ${bt.remarks}" else ""}")
+            logActivity("Recorded bank ${bt.transactionType}", "₹${bt.amount}${if (bt.bankAccount.isNotBlank()) " [${bt.bankAccount}]" else ""}${if (bt.remarks.isNotBlank()) " - ${bt.remarks}" else ""}")
             Result.success(docRef.id)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    suspend fun updateBankTransaction(bt: BankTransaction): Result<Unit> {
+        val firestore = getFirestore() ?: return Result.failure(Exception("Firestore unavailable"))
+        return try {
+            firestore.collection("bankTransactions").document(bt.docId).update(
+                mapOf(
+                    "transactionType" to bt.transactionType,
+                    "amount" to bt.amount,
+                    "date" to bt.date,
+                    "transactionId" to bt.transactionId,
+                    "remarks" to bt.remarks,
+                    "bankAccount" to bt.bankAccount
+                )
+            ).await()
+            logActivity("Edited bank ${bt.transactionType}", "₹${bt.amount}${if (bt.remarks.isNotBlank()) " - ${bt.remarks}" else ""}")
+            Result.success(Unit)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    /** Moves money between two bank accounts as a linked pair of entries (Transfer Out + Transfer In). */
+    suspend fun recordBankTransfer(
+        from: String,
+        to: String,
+        amount: Long,
+        date: String,
+        transactionId: String,
+        remarks: String
+    ): Result<Unit> {
+        val firestore = getFirestore() ?: return Result.failure(Exception("Firestore unavailable"))
+        return try {
+            val outRef = firestore.collection("bankTransactions").document()
+            val inRef = firestore.collection("bankTransactions").document()
+            val transferId = outRef.id
+            val batch = firestore.batch()
+            batch.set(
+                outRef,
+                mapOf(
+                    "transactionType" to BankTxType.TRANSFER_OUT,
+                    "amount" to amount,
+                    "date" to date,
+                    "transactionId" to transactionId,
+                    "remarks" to remarks.ifBlank { "Transfer to $to" },
+                    "bankAccount" to from,
+                    "transferId" to transferId
+                )
+            )
+            batch.set(
+                inRef,
+                mapOf(
+                    "transactionType" to BankTxType.TRANSFER_IN,
+                    "amount" to amount,
+                    "date" to date,
+                    "transactionId" to transactionId,
+                    "remarks" to remarks.ifBlank { "Transfer from $from" },
+                    "bankAccount" to to,
+                    "transferId" to transferId
+                )
+            )
+            batch.commit().await()
+            logActivity("Bank transfer", "₹$amount  $from -> $to")
+            Result.success(Unit)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    /** Deletes both entries of a transfer together. */
+    suspend fun deleteBankTransferLegs(docIds: List<String>, amount: Long): Result<Unit> {
+        val firestore = getFirestore() ?: return Result.failure(Exception("Firestore unavailable"))
+        return try {
+            val batch = firestore.batch()
+            docIds.forEach { id -> batch.delete(firestore.collection("bankTransactions").document(id)) }
+            batch.commit().await()
+            logActivity("Deleted bank transfer", "₹$amount")
+            Result.success(Unit)
         } catch (e: Exception) {
             Result.failure(e)
         }
@@ -1124,6 +1208,25 @@ class FirebaseRepository(private val context: Context) {
         }
     }
 
+    suspend fun updateDonation(d: Donation): Result<Unit> {
+        val firestore = getFirestore() ?: return Result.failure(Exception("Firestore unavailable"))
+        return try {
+            firestore.collection("donations").document(d.docId).update(
+                mapOf(
+                    "donorName" to d.donorName.trim(),
+                    "donorContact" to d.donorContact.trim(),
+                    "amount" to d.amount,
+                    "date" to d.date,
+                    "purpose" to d.purpose.trim()
+                )
+            ).await()
+            logActivity("Edited donation", "${d.donorName} - ₹${d.amount}")
+            Result.success(Unit)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
     suspend fun recordGeneralExpense(expense: GeneralExpense): Result<String> {
         val firestore = getFirestore() ?: return Result.failure(Exception("Firestore unavailable"))
         return try {
@@ -1144,11 +1247,181 @@ class FirebaseRepository(private val context: Context) {
         }
     }
 
+    suspend fun updateGeneralExpense(e: GeneralExpense): Result<Unit> {
+        val firestore = getFirestore() ?: return Result.failure(Exception("Firestore unavailable"))
+        return try {
+            firestore.collection("generalExpenses").document(e.docId).update(
+                mapOf(
+                    "description" to e.description.trim(),
+                    "amount" to e.amount,
+                    "date" to e.date,
+                    "category" to e.category
+                )
+            ).await()
+            logActivity("Edited general expense", "${e.description} - ₹${e.amount}")
+            Result.success(Unit)
+        } catch (ex: Exception) {
+            Result.failure(ex)
+        }
+    }
+
     suspend fun deleteGeneralExpense(expense: GeneralExpense): Result<Unit> {
         val firestore = getFirestore() ?: return Result.failure(Exception("Firestore unavailable"))
         return try {
             firestore.collection("generalExpenses").document(expense.docId).delete().await()
             logActivity("Deleted general expense", "${expense.description} - ₹${expense.amount}")
+            Result.success(Unit)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    // ----------------------------------------------------
+    // NOTICES (admin posts, everyone reads)
+    // ----------------------------------------------------
+
+    fun getNoticesFlow(): Flow<List<Notice>> = callbackFlow {
+        val firestore = getFirestore()
+        if (firestore == null) {
+            trySend(emptyList())
+            close()
+            return@callbackFlow
+        }
+        val listener = firestore.collection("notices")
+            .addSnapshotListener { snapshot, error ->
+                if (error != null) {
+                    Log.e(TAG, "Notices listener error", error)
+                    return@addSnapshotListener
+                }
+                val list = snapshot?.documents?.mapNotNull { doc ->
+                    try {
+                        Notice(
+                            docId = doc.id,
+                            title = doc.getString("title") ?: "",
+                            body = doc.getString("body") ?: "",
+                            pinned = doc.getBoolean("pinned") ?: false,
+                            postedBy = doc.getString("postedBy") ?: "",
+                            createdAt = doc.getString("createdAt") ?: ""
+                        )
+                    } catch (e: Exception) {
+                        null
+                    }
+                }?.sortedWith(compareByDescending<Notice> { it.pinned }.thenByDescending { it.createdAt }) ?: emptyList()
+                trySend(list)
+            }
+        awaitClose { listener.remove() }
+    }
+
+    suspend fun addNotice(n: Notice): Result<Unit> {
+        val firestore = getFirestore() ?: return Result.failure(Exception("Firestore unavailable"))
+        return try {
+            firestore.collection("notices").add(
+                mapOf(
+                    "title" to n.title.trim(),
+                    "body" to n.body.trim(),
+                    "pinned" to n.pinned,
+                    "postedBy" to n.postedBy,
+                    "createdAt" to n.createdAt
+                )
+            ).await()
+            logActivity("Posted notice", n.title.trim())
+            Result.success(Unit)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    suspend fun updateNotice(n: Notice): Result<Unit> {
+        val firestore = getFirestore() ?: return Result.failure(Exception("Firestore unavailable"))
+        return try {
+            firestore.collection("notices").document(n.docId).update(
+                mapOf(
+                    "title" to n.title.trim(),
+                    "body" to n.body.trim(),
+                    "pinned" to n.pinned
+                )
+            ).await()
+            logActivity("Edited notice", n.title.trim())
+            Result.success(Unit)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    suspend fun deleteNotice(n: Notice): Result<Unit> {
+        val firestore = getFirestore() ?: return Result.failure(Exception("Firestore unavailable"))
+        return try {
+            firestore.collection("notices").document(n.docId).delete().await()
+            logActivity("Deleted notice", n.title)
+            Result.success(Unit)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    // ----------------------------------------------------
+    // BANK ACCOUNTS (admin manages, everyone reads)
+    // ----------------------------------------------------
+
+    fun getBankAccountsFlow(): Flow<List<BankAccount>> = callbackFlow {
+        val firestore = getFirestore()
+        if (firestore == null) {
+            trySend(emptyList())
+            close()
+            return@callbackFlow
+        }
+        val listener = firestore.collection("bankAccounts")
+            .addSnapshotListener { snapshot, error ->
+                if (error != null) {
+                    Log.e(TAG, "Bank accounts listener error", error)
+                    return@addSnapshotListener
+                }
+                val list = snapshot?.documents?.mapNotNull { doc ->
+                    try {
+                        BankAccount(
+                            docId = doc.id,
+                            name = doc.getString("name") ?: "",
+                            openingBalance = doc.getLong("openingBalance") ?: 0L
+                        )
+                    } catch (e: Exception) {
+                        null
+                    }
+                }?.sortedBy { it.name.lowercase() } ?: emptyList()
+                trySend(list)
+            }
+        awaitClose { listener.remove() }
+    }
+
+    suspend fun addBankAccount(name: String, openingBalance: Long): Result<Unit> {
+        val firestore = getFirestore() ?: return Result.failure(Exception("Firestore unavailable"))
+        return try {
+            firestore.collection("bankAccounts").add(
+                mapOf("name" to name.trim(), "openingBalance" to openingBalance)
+            ).await()
+            logActivity("Added bank account", "${name.trim()} (opening ₹$openingBalance)")
+            Result.success(Unit)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    suspend fun updateBankAccountOpening(account: BankAccount, openingBalance: Long): Result<Unit> {
+        val firestore = getFirestore() ?: return Result.failure(Exception("Firestore unavailable"))
+        return try {
+            firestore.collection("bankAccounts").document(account.docId)
+                .update(mapOf("openingBalance" to openingBalance)).await()
+            logActivity("Changed opening balance", "${account.name}: ₹$openingBalance")
+            Result.success(Unit)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    suspend fun deleteBankAccount(account: BankAccount): Result<Unit> {
+        val firestore = getFirestore() ?: return Result.failure(Exception("Firestore unavailable"))
+        return try {
+            firestore.collection("bankAccounts").document(account.docId).delete().await()
+            logActivity("Deleted bank account", account.name)
             Result.success(Unit)
         } catch (e: Exception) {
             Result.failure(e)

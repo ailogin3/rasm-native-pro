@@ -15,8 +15,10 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.data.model.Member
+import com.example.ui.components.UpdateBanner
 import com.example.ui.screens.*
 import com.example.ui.viewmodel.RasmViewModel
+import androidx.lifecycle.compose.LifecycleResumeEffect
 import kotlinx.coroutines.launch
 
 enum class Screen(val title: String, val icon: ImageVector) {
@@ -27,6 +29,7 @@ enum class Screen(val title: String, val icon: ImageVector) {
     FINANCES("Finance", Icons.Default.AccountBalance),
     MEETINGS("Meetings", Icons.Default.CoPresent),
     SERVICES("Services", Icons.Default.Storefront),
+    NOTICES("Notices", Icons.Default.Campaign),
     ACTIVITY("Audit Log", Icons.Default.History),
     SETTINGS("Settings", Icons.Default.Settings),
     FAMILY("My Family", Icons.Default.FamilyRestroom),
@@ -42,6 +45,8 @@ fun MainApp(viewModel: RasmViewModel) {
     val currentUser by viewModel.currentUser.collectAsState()
     val isAdmin by viewModel.isAdmin.collectAsState()
     val settings by viewModel.settings.collectAsState()
+    val showUpdateBanner by viewModel.showUpdateBanner.collectAsState()
+    val appVersionInfo by viewModel.appVersionInfo.collectAsState()
 
     val snackbarHostState = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
@@ -51,6 +56,13 @@ fun MainApp(viewModel: RasmViewModel) {
         viewModel.userMessage.collect { msg ->
             snackbarHostState.showSnackbar(msg)
         }
+    }
+
+    // Re-check for a new version every time the app returns to the
+    // foreground (not just on cold start) -- see RasmViewModel.refreshUpdateCheck.
+    LifecycleResumeEffect(Unit) {
+        viewModel.refreshUpdateCheck()
+        onPauseOrDispose { }
     }
 
     if (currentUser == null) {
@@ -131,6 +143,14 @@ fun MainApp(viewModel: RasmViewModel) {
                                 leadingIcon = { Icon(Icons.Default.Storefront, contentDescription = null) },
                                 onClick = {
                                     currentScreen = Screen.SERVICES
+                                    showMenu = false
+                                }
+                            )
+                            DropdownMenuItem(
+                                text = { Text("Notices") },
+                                leadingIcon = { Icon(Icons.Default.Campaign, contentDescription = null) },
+                                onClick = {
+                                    currentScreen = Screen.NOTICES
                                     showMenu = false
                                 }
                             )
@@ -234,11 +254,18 @@ fun MainApp(viewModel: RasmViewModel) {
                 }
             }
         ) { innerPadding ->
-            Box(
+            Column(
                 modifier = Modifier
                     .fillMaxSize()
                     .padding(innerPadding)
             ) {
+                if (showUpdateBanner && appVersionInfo != null) {
+                    UpdateBanner(
+                        info = appVersionInfo!!,
+                        onDismiss = { viewModel.dismissUpdateBanner() }
+                    )
+                }
+                Box(modifier = Modifier.weight(1f)) {
                 when (currentScreen) {
                     Screen.HOME -> HomeScreen(
                         viewModel = viewModel,
@@ -248,7 +275,8 @@ fun MainApp(viewModel: RasmViewModel) {
                         },
                         onViewMemberProfile = { member ->
                             profileMemberToView = member
-                        }
+                        },
+                        onOpenNotices = { currentScreen = Screen.NOTICES }
                     )
                     Screen.MEMBERS -> MembersScreen(
                         viewModel = viewModel,
@@ -269,6 +297,9 @@ fun MainApp(viewModel: RasmViewModel) {
                     Screen.SERVICES -> ServicesScreen(
                         viewModel = viewModel
                     )
+                    Screen.NOTICES -> NoticesScreen(
+                        viewModel = viewModel
+                    )
                     Screen.ACTIVITY -> ActivityLogScreen(
                         viewModel = viewModel
                     )
@@ -281,6 +312,7 @@ fun MainApp(viewModel: RasmViewModel) {
                     Screen.HELP -> HelpScreen()
                     Screen.CONTACT -> ContactScreen(viewModel = viewModel)
                     Screen.PRIVACY -> PrivacyPolicyScreen(viewModel = viewModel)
+                }
                 }
             }
         }

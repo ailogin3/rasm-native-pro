@@ -37,6 +37,8 @@ import coil.compose.AsyncImage
 import com.example.data.model.FamilyMember
 import com.example.data.model.Member
 import com.example.ui.viewmodel.RasmViewModel
+import com.example.util.DuesCalculator
+import com.example.util.DuesInfo
 import com.example.util.ImageUtils
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -56,7 +58,9 @@ fun MembersScreen(
     val members by viewModel.members.collectAsState()
     val maintenanceCollections by viewModel.maintenanceCollections.collectAsState()
     val eventCollections by viewModel.eventCollections.collectAsState()
+    val settings by viewModel.settings.collectAsState()
     val isAdmin by viewModel.isAdmin.collectAsState()
+    val canManageMoney by viewModel.canManageMoney.collectAsState()
     val currentMember by viewModel.currentMember.collectAsState()
     val context = LocalContext.current
 
@@ -85,6 +89,15 @@ fun MembersScreen(
             }
 
             matchesQuery && matchesFilter
+        }
+    }
+
+    // Months / amount due per member, recalculated only when members, payments, fee or the month change.
+    val currentMonthValue = DuesCalculator.currentMonthValue()
+    val duesByMember = remember(members, maintenanceCollections, settings.monthlyFee, currentMonthValue, canManageMoney) {
+        if (!canManageMoney) emptyMap<String, DuesInfo>()
+        else members.associate { m ->
+            m.docId to DuesCalculator.forMember(m, maintenanceCollections, settings.monthlyFee, currentMonthValue)
         }
     }
 
@@ -155,6 +168,15 @@ fun MembersScreen(
                 }
             }
 
+            if (isAdmin) {
+                Spacer(modifier = Modifier.height(4.dp))
+                MemberBulkTools(
+                    viewModel = viewModel,
+                    members = members,
+                    duesByMember = duesByMember
+                )
+            }
+
             Spacer(modifier = Modifier.height(12.dp))
 
             // Count header
@@ -201,6 +223,7 @@ fun MembersScreen(
                             member = member,
                             paymentCount = mCount + eCount,
                             isAdmin = isAdmin,
+                            dues = duesByMember[member.docId],
                             onView = { viewingMember = member },
                             onEdit = { editingMember = member },
                             onDelete = { memberToDelete = member },
@@ -323,7 +346,8 @@ fun MemberCard(
     onEdit: () -> Unit,
     onDelete: () -> Unit,
     onCall: () -> Unit = {},
-    onWhatsApp: () -> Unit = {}
+    onWhatsApp: () -> Unit = {},
+    dues: DuesInfo? = null
 ) {
     Card(
         modifier = Modifier
@@ -430,6 +454,20 @@ fun MemberCard(
                             )
                         }
                     }
+                }
+                // Dues status (admins only): "3 months due • ₹1,500"
+                if (dues != null) {
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text(
+                        text = DuesCalculator.dueText(dues),
+                        color = when {
+                            !dues.hasRecord -> Color(0xFF757575)
+                            dues.monthsDue == 0 -> Color(0xFF2E7D32)
+                            else -> Color(0xFFC62828)
+                        },
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.SemiBold
+                    )
                 }
             }
 

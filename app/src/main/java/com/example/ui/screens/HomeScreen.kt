@@ -34,8 +34,10 @@ import com.example.util.ImageUtils
 fun HomeScreen(
     viewModel: RasmViewModel,
     onNavigateToMembers: (filterType: String?) -> Unit,
-    onViewMemberProfile: (Member) -> Unit
+    onViewMemberProfile: (Member) -> Unit,
+    onOpenNotices: () -> Unit = {}
 ) {
+    val notices by viewModel.notices.collectAsState()
     val members by viewModel.members.collectAsState()
     val settings by viewModel.settings.collectAsState()
     val officeBearers by viewModel.officeBearers.collectAsState()
@@ -129,6 +131,42 @@ fun HomeScreen(
                                 modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
                             )
                         }
+                    }
+                }
+            }
+        }
+
+        // Latest notice (pinned ones come first)
+        notices.firstOrNull()?.let { notice ->
+            Card(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(bottom = 16.dp)
+                    .clickable { onOpenNotices() },
+                shape = RoundedCornerShape(16.dp),
+                colors = CardDefaults.cardColors(containerColor = Color(0xFFFFF8E1))
+            ) {
+                Row(
+                    modifier = Modifier.padding(14.dp),
+                    verticalAlignment = Alignment.Top,
+                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    Icon(Icons.Default.Campaign, contentDescription = null, tint = Color(0xFF8D6E00))
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = if (notice.pinned) "Pinned notice" else "Latest notice",
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            color = Color(0xFF8D6E00)
+                        )
+                        Text(notice.title, fontWeight = FontWeight.Bold)
+                        Text(notice.body, fontSize = 13.sp, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                        Text(
+                            "See all notices",
+                            fontSize = 12.sp,
+                            color = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.padding(top = 4.dp)
+                        )
                     }
                 }
             }
