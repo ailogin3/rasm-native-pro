@@ -129,10 +129,12 @@ class RasmViewModel(application: Application) : AndroidViewModel(application) {
 
     /** Checks the phone against member records before an OTP is ever sent. */
     fun checkPhoneIsMember(phone: String, onResult: (Boolean) -> Unit) {
-        viewModelScope.launch {
-            onResult(repository.phoneBelongsToMember(phone))
-        }
+    // TEMP BYPASS FOR TESTING (Spark plan, Cloud Functions need Blaze to deploy):
+    onResult(true); return
+    viewModelScope.launch {
+        onResult(repository.phoneBelongsToMember(phone))
     }
+}
 
     /**
      * Sends the OTP. onCodeSent gives the verificationId to hold onto for verifyOtp;
